@@ -1,0 +1,528 @@
+#!/usr/bin/env python
+# OptTaxPro: Optimized Taxonomic Profiling of microbiome using full-length 16S rRNA sequences
+
+__author__ = "hjgwak"
+__version__ = "0.0.1"
+
+import os
+import sys
+import argparse
+import logging
+
+import subprocess as sp
+
+from classify import DB
+from profile import DEFAULT_RANKS as PROFILE_RANKS
+from utils.commons import run_cmd
+from utils.taxonomy_assignment import (
+	ACC2TAXID, 
+	HSG_FILE, 
+	RANKS, 
+	CUTOFFS
+)
+from utils.config import parse_cfg
+
+def build_parser():
+	def common_args(common_group, default_suffix='.fastq'):
+		common_group.add_argument("-q", "--quiet",
+			dest="quiet",
+			action="store_true",
+			help="quiet; do not print any message on the screen")
+		common_group.add_argument("--log",
+			dest="log",
+			metavar="FILE",
+			help="log file name; default stderr")
+		common_group.add_argument("-p", "--processes",
+			dest="p",
+			metavar="INT",
+			type=int,
+			default=10,
+			help="the number of processes to run concurrently; default 10")
+		common_group.add_argument("--suffix",
+			dest="suffix",
+			metavar="STR",
+			default=default_suffix,
+			help=f"suffix of input files; default {default_suffix}")
+		common_group.add_argument("--t_dir",
+			dest="t_dir",
+			metavar="PATH",
+			default="./",
+			help="temporal directory to saving intermediate files; default ./")
+		common_group.add_argument("-o", "--o_dir",
+			dest="o_dir",
+			metavar="PATH",
+			default="./",
+			help="directory for saving preprocessed samples; default ./")
+
+	def preprocess_args(subparsers, standalone=True):
+		if standalone:
+			preprocess = subparsers.add_parser("preprocess",
+				help="preprocessing for full-length 16S rRNA samples")
+
+			# optional arguments
+			common_args(preprocess, default_suffix='.fastq')
+		else:
+			preprocess = subparsers
+
+		# cutadapt arguments
+		cut_group = preprocess.add_argument_group("cutadapt arguments")
+		cut_group.add_argument("-m", "--min-len",
+			dest='m',
+			metavar="INT",
+			type=int,
+			default=1300,
+			help="minimum length to retain; default 1300")
+		cut_group.add_argument("-M", "--max-len",
+			dest='M',
+			metavar="INT",
+			type=int,
+			default=1850,
+			help="maximum length to retain; default 1850")
+		cut_group.add_argument("-O",
+			dest='O',
+			metavar='INT',
+			type=int,
+			default=15,
+			help="minimum overlap length between read and adapter; deault 15")
+		cut_group.add_argument("-e",
+			dest='e',
+			metavar="FLOAT",
+			type=float,
+			default=0.15,
+			help="maximum allowed error rate; default 0.15")
+
+		# quality control arguments
+		qc_group = preprocess.add_argument_group("quality control arguments")
+		qc_group.add_argument("--qc-cutoff",
+			dest='qc_cutoff',
+			metavar="FLOAT",
+			type=float,
+			default=0.99,
+			help="minimum average read quality; default 0.99")
+
+		# singleton arguments
+		single_group = preprocess.add_argument_group("singleton removal arguments")
+		single_group.add_argument("--single-cutoff",
+			dest='single_cutoff',
+			metavar="FLOAT",
+			type=float,
+			default=0.97,
+			help="OTU clustering cutoff; default 0.97")
+		single_group.add_argument("--single-threads",
+			dest="single_threads",
+			metavar="INT",
+			type=int,
+			default=5,
+			help="the number of threads for VSEARCH; default 5")
+
+		if standalone:
+			# required arguments
+			req_group = preprocess.add_argument_group("required arguments")
+			input_group = req_group.add_mutually_exclusive_group(required=True)
+			input_group.add_argument("-c", "--config",
+				dest="config",
+				metavar="CONFIG",
+				help="configuration file for arguments")
+			input_group.add_argument("-i", "--i_dir",
+				dest="i_dir",
+				metavar="PATH",
+				help="directory involving raw fastq files")
+
+	def cluster_args(subparsers, standalone=True):
+		if standalone:
+			cluster = subparsers.add_parser("cluster",
+				help="clustering for preprocessed samples")
+			# optional arguments
+			common_args(cluster, default_suffix='.fastq')
+		else:
+			cluster = subparsers
+
+		# VSEARCH arguments
+		otu_group = cluster.add_argument_group("cluster_fast arguments")
+		otu_group.add_argument("--otu-cutoff",
+			dest='otu_cutoff',
+			metavar="FLOAT",
+			type=float,
+			default=0.99,
+			help="OTU clustering cutoff; default 0.99")
+		otu_group.add_argument("--otu-threads",
+			dest="otu_threads",
+			metavar="INT",
+			type=int,
+			default=5,
+			help="the number of threads for VSEARCH; default 5")
+
+		if standalone:
+			# required arguments
+			req_group = cluster.add_argument_group("required arguments")
+			input_group = req_group.add_mutually_exclusive_group(required=True)
+			input_group.add_argument("-c", "--config",
+				dest="config",
+				metavar="CONFIG",
+				help="configuration file for arguments")
+			input_group.add_argument("-i", "--i_dir",
+				dest="i_dir",
+				metavar="PATH",
+				help="directory involving raw fastq files")
+
+	def classify_args(subparsers, standalone=True):
+		if standalone:
+			classify = subparsers.add_parser("classify",
+				help="classifying taxonomy for samples")
+			# optional arguments
+			common_args(classify, default_suffix='.rep.fna')
+		else:
+			classify = subparsers
+
+		# VSEARCH arguments
+		vse_group = classify.add_argument_group("VSEARCH arguments")
+		vse_group.add_argument("-d", "--db",
+			dest="db",
+			metavar="FILE",
+			default=DB,
+			help=f"16S database file; default {DB}")
+		vse_group.add_argument("--search-threads",
+			dest='search_threads',
+			metavar="INT",
+			type=int,
+			default=5,
+			help="the number of threads for each process; default 5")
+		vse_group.add_argument("--search-cutoffs",
+			dest='search_cutoffs',
+			metavar="FLOAT",
+			nargs='+',
+			type=float,
+			default=[0.94, 0.86, 0.75],
+			help="homology search cutoffs for iterative search; default [0.94, 0.86, 0.75]")
+
+		# assignment arguments
+		asg_group = classify.add_argument_group("assignment arguments")
+		asg_group.add_argument("-r", "--ranks",
+			dest='ranks',
+			metavar="RANK",
+			nargs="+",
+			default=RANKS,
+			help=f"target ranks to assign; default {' '.join(RANKS)}")
+		asg_group.add_argument("--assign-cutoffs",
+			dest='assign_cutoffs',
+			metavar="FLOAT",
+			nargs="+",
+			default=CUTOFFS,
+			help=f"identity cutoffs for each rank; default {' '.join([str(c) for c in CUTOFFS])}")
+		asg_group.add_argument("--acc2taxid",
+			dest='acc2taxid',
+			metavar="FILE",
+			default=ACC2TAXID,
+			help=f"accession to taxid mapping file; default {ACC2TAXID}")
+		asg_group.add_argument("--hsg",
+			dest="hsg",
+			metavar="FILE",
+			default=HSG_FILE,
+			help=f"HSG definition file; default {HSG_FILE}")
+		asg_group.add_argument("--remove-self",
+			dest="rm_self",
+			action="store_true",
+			help="remove self hit according to the assembly_accession")
+		if standalone:
+			asg_group.add_argument("--u_dir",
+				dest="u_dir",
+				metavar="PATH",
+				help="directory involving uclust results")
+			asg_group.add_argument("--uc-suffix",
+				dest="uc_suffix",
+				metavar="STR",
+				default=".uc",
+				help="suffix of uclust result files; default .uc")
+		asg_group.add_argument("--add-name",
+			dest="add_name",
+			action="store_true",
+			help="add scientific_name column")
+
+
+		if standalone:
+			# required arguments
+			req_group = classify.add_argument_group("required arguments")
+			input_group = req_group.add_mutually_exclusive_group(required=True)
+			input_group.add_argument("-c", "--config",
+				dest="config",
+				metavar="CONFIG",
+				help="configuration file for arguments")
+			input_group.add_argument("-i", "--i_dir",
+				dest="i_dir",
+				metavar="PATH",
+				help="directory involving raw fastq files")
+
+	def profile_args(subparsers, standalone=True):
+		if standalone:
+			profile = subparsers.add_parser("profile",
+				help="aggregating taxonomy assignment results")
+			# optional arguments
+			common_args(profile, default_suffix='.ta.csv')
+		else:
+			profile = subparsers
+
+		# profile arguments
+		prof_group = profile.add_argument_group("profile arguments")
+		if standalone:
+			prof_group.add_argument("--u_dir",
+				dest="u_dir",
+				metavar="FILE",
+				help="directory involving uclust results")
+			prof_group.add_argument("--uc-suffix",
+				dest="u_suffix",
+				metavar="STR",
+				default=".uc",
+				help="suffix of uclust file; default .uc")
+		prof_group.add_argument("--profile-ranks",
+			dest="prof_ranks",
+			metavar="RANK",
+			nargs="+",
+			default=PROFILE_RANKS,
+			help=f"target ranks to generate profile; default {' '.join(PROFILE_RANKS)}")
+		prof_group.add_argument("--base-col",
+			dest="base_col",
+			choices=('assigned', 'scientific_name'),
+			default="assigned",
+			help="base column to be row of the profile results; default assigned")
+		prof_group.add_argument("--filtering-cutoffs",
+			dest="filter_cutoffs",
+			metavar="FLOAT",
+			nargs='*',
+			type=float,
+			default=None,
+			help="filtering cutoff for low abundance")
+		prof_group.add_argument("--filtering-pivot",
+			dest="filter_pivot",
+			choices=("max", "min", "median", "avg"),
+			default='max',
+			help="method for obtain filtering pivots; default max")
+		prof_group.add_argument("--output-prefix",
+			dest="prof_prefix",
+			metavar="STR",
+			default="",
+			help="prefix of output tables")
+
+		if standalone:
+			# required arguments
+			req_group = profile.add_argument_group("required arguments")
+			input_group = req_group.add_mutually_exclusive_group(required=True)
+			input_group.add_argument("-c", "--config",
+				dest="config",
+				metavar="CONFIG",
+				help="configuration file for arguments")
+			input_group.add_argument("-i", "--i_dir",
+				dest="i_dir",
+				metavar="PATH",
+				help="directory involving raw fastq files")
+
+	def alltheway_args(subparsers):
+		alltheway = subparsers.add_parser("alltheway",
+			help="one command analysis for full-length 16S rRNA samples")
+
+		# optional arguments
+		common_args(alltheway, default_suffix='.fastq')
+
+		# subprogram arguments
+		preprocess_args(alltheway, standalone=False)
+		cluster_args(alltheway, standalone=False)
+		classify_args(alltheway, standalone=False)
+		profile_args(alltheway, standalone=False)
+
+		# required arguments
+		req_group = alltheway.add_argument_group("required arguments")
+		input_group = req_group.add_mutually_exclusive_group(required=True)
+		input_group.add_argument("-c", "--config",
+			dest="config",
+			metavar="CONFIG",
+			help="configuration file for arguments")
+		input_group.add_argument("-i", "--i_dir",
+			dest="i_dir",
+			metavar="PATH",
+			help="directory involving raw fastq files")
+
+	parser = argparse.ArgumentParser("OptTaxPro")
+	subparsers = parser.add_subparsers(dest='prog')
+
+	preprocess_args(subparsers)
+	cluster_args(subparsers)
+	classify_args(subparsers)
+	profile_args(subparsers)
+	alltheway_args(subparsers)
+
+	return parser
+
+def run_preprocessing(args, rpath, 
+	i_dir=None, o_dir=None, t_dir=None,
+	suffix=None):
+	i_dir = i_dir or args.i_dir
+	o_dir = o_dir or args.o_dir
+	t_dir = t_dir or args.t_dir
+	suffix = suffix or args.suffix
+
+	cmd = [f"{rpath}/preprocessing.py",
+		"--t_dir", t_dir,
+		"-p", args.p,
+		"-m", args.m, "-M", args.M,
+		"-O", args.O, "-e", args.e,
+		"--qc-cutoff", args.qc_cutoff, 
+		"--otu-cutoff", args.single_cutoff, "--threads", args.single_threads,
+		"-i", i_dir, "-o", o_dir,
+		"--suffix", suffix,
+	]
+	if args.quiet:
+		cmd += ['--quiet']
+	if args.log is not None:
+		cmd += ['--log', args.log]
+	_ = run_cmd(cmd)
+
+def run_clustering(args, rpath, 
+	i_dir=None, o_dir=None,
+	suffix=None):
+	i_dir = i_dir or args.i_dir
+	o_dir = o_dir or args.o_dir
+	suffix = suffix or args.suffix
+
+	cmd = [f"{rpath}/clustering.py",
+		"-p", args.p // args.otu_threads,
+		"--threads", args.otu_threads,
+		"--cutoff", args.otu_cutoff,
+		"-i", i_dir, "-o", o_dir,
+		"--suffix", suffix
+	]
+	if args.quiet:
+		cmd += ['--quiet']
+	if args.log is not None:
+		cmd += ['--log', args.log]
+	_ = run_cmd(cmd)
+
+def run_classify(args, rpath, 
+	i_dir=None, o_dir=None, 
+	t_dir=None, 
+	u_dir=None, uc_suffix=None,
+	suffix=None):
+	i_dir = i_dir or args.i_dir
+	o_dir = o_dir or args.o_dir
+	t_dir = t_dir or args.t_dir
+	u_dir = u_dir or args.u_dir
+	uc_suffix = uc_suffix or args.uc_suffix
+	suffix = suffix or args.suffix
+
+	cmd = [f"{rpath}/classify.py",
+		"--t_dir", t_dir,
+		"-p", args.p,
+		"-i", i_dir, "-o", o_dir,
+		"--db", args.db,
+		"--suffix", suffix,
+		"--threads", args.search_threads,
+		"--acc2taxid", args.acc2taxid,
+		"--hsg", args.hsg,
+	]
+	cmd += ['--search-cutoffs'] + args.search_cutoffs
+	cmd += ['--ranks'] + args.ranks
+	cmd += ['--assign-cutoffs'] + args.assign_cutoffs
+	if args.quiet:
+		cmd += ['--quiet']
+	if args.log is not None:
+		cmd += ['--log', args.log]
+	if args.rm_self:
+		cmd += ['--remove-self']
+	if u_dir is not None:
+		cmd += ['--u_dir', u_dir]
+		cmd += ['--uc-suffix', uc_suffix]
+	if args.add_name is not None:
+		cmd += ['--add-name']
+	_ = run_cmd(cmd)
+
+def run_profile(args, rpath,
+	i_dir=None, o_dir=None, 
+	u_dir=None, uc_suffix=None,
+	suffix=None):
+	i_dir = i_dir or args.i_dir
+	o_dir = o_dir or args.o_dir
+	suffix = suffix or args.suffix
+
+	cmd = [f'{rpath}/profile.py',
+		'-i', i_dir, '-o', o_dir,
+		'-p', args.p,
+		'--suffix', suffix,
+		'--base-col', args.base_col,
+		'--filtering-pivot', args.filter_pivot
+	]
+	if args.quiet:
+		cmd += ['--quiet']
+	if args.log is not None:
+		cmd += ['--log', args.log]
+	if u_dir is not None:
+		cmd += ['--u_dir', u_dir]
+		cmd += ['--uc-suffix', uc_suffix]
+	if args.prof_prefix is not None:
+		cmd += ['--output-prefix', args.prof_prefix]
+	if args.filter_cutoffs is not None:
+		cmd += ['--filtering-cutoffs'] + args.filter_cutoffs
+	_ = run_cmd(cmd)
+
+def main(argv = sys.argv[1:]):
+	parser = build_parser()
+	args = parser.parse_args(argv)
+	if args.config is not None:
+		configs = parse_cfg(args.config, args.prog)
+		args = parser.parse_args(configs)
+
+	logging.basicConfig(
+		filename=args.log,
+		format='[%(asctime)s] %(message)s', 
+		datefmt='%Y/%m/%d %I:%M:%S', 
+		level=logging.INFO if not args.quiet else 100,
+	)
+
+	pname = os.path.basename(sys.argv[0])
+	logging.info(f"[{pname}] {sys.executable} {' '.join(sys.argv)}")
+	rpath, _ = os.path.split(os.path.realpath(__file__))
+
+	if args.prog == "preprocess":
+		run_preprocessing(args, rpath)
+	elif args.prog == "cluster":
+		run_clustering(args, rpath)
+	elif args.prog == "classify":
+		run_classify(args, rpath)
+	elif args.prog == "profile":
+		run_profile(args, rpath, u_dir=args.u_dir)
+	elif args.prog == "alltheway":
+		os.makedirs(args.o_dir, exist_ok=True)
+
+		pre_dir = f"{args.o_dir}/0_preprocessing"
+		os.makedirs(pre_dir, exist_ok=True)
+		run_preprocessing(args, rpath,
+			i_dir=args.i_dir, o_dir=pre_dir,
+			t_dir=args.t_dir,
+			suffix=args.suffix
+		)
+
+		otu_dir = f"{args.o_dir}/1_clustering"
+		os.makedirs(otu_dir, exist_ok=True)
+		run_clustering(args, rpath,
+			i_dir=pre_dir, o_dir=otu_dir,
+			suffix=".clean.fastq"
+		)
+
+		ta_dir = f"{args.o_dir}/2_taxonomy_assignment"
+		os.makedirs(ta_dir, exist_ok=True)
+		run_classify(args, rpath,
+			i_dir=otu_dir, o_dir=ta_dir,
+			t_dir=args.t_dir, 
+			u_dir=otu_dir, uc_suffix='.uc',
+			suffix=".rep.fna"
+		)
+
+		prof_dir = f"{args.o_dir}/3_profile"
+		os.makedirs(prof_dir, exist_ok=True)
+		run_profile(args, rpath,
+			i_dir=ta_dir, o_dir=prof_dir,
+			u_dir=None, suffix='.ta.csv'
+		)
+
+	exit(0)
+
+if __name__ == "__main__":
+	exit(main())
+	
