@@ -152,7 +152,7 @@ def main(argv = sys.argv[1:]):
 				'--db', args.db, '--blast6out', m6_file
 			]
 			cmds.append(cmd)
-		auto_run(run_cmd, cmds, args.p, quiet=args.quiet, desc=f'search (cutoff={id_cutoff:.2f})')
+		auto_run(run_cmd, cmds, args.p // args.t, quiet=args.quiet, desc=f'search (cutoff={id_cutoff:.2f})')
 		logging.info(f"[{pname}] Done. (VSEARCH; cutoff={id_cutoff:.2f})")
 
 		# GET unmapped sequences

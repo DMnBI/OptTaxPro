@@ -26,6 +26,10 @@ def parse_args(argv = sys.argv[1:]):
 		dest="output",
 		metavar="STR",
 		help="output file name; default stdout")
+	parser.add_argument("--add-all",
+		dest='add_all',
+		action='store_true',
+		help="add all species from acc2taxid into output")
 
 	# required arguments
 	req_group = parser.add_argument_group("required arguments")
@@ -75,14 +79,15 @@ def main(argv = sys.argv[1:]):
 	df = df.set_index('species')
 
 	ncbi = NCBITaxa()
-	species_list = pd.read_csv(args.acc2taxid, sep='\t', index_col='accession')['species_taxid'].unique()
-	for species in species_list:
-		if species not in df.index:
-			lineage = ncbi.get_lineage(species)
-			rank = ncbi.get_rank(lineage)
-			r2t = {r:t for t, r in rank.items()}
-			genus = r2t['genus']
-			df.loc[species] = [ncbi.get_taxid_translator([species])[species], f"{genus}:0", True]
+	if args.add_all:
+		species_list = pd.read_csv(args.acc2taxid, sep='\t', index_col='accession')['species_taxid'].unique()
+		for species in species_list:
+			if species not in df.index:
+				lineage = ncbi.get_lineage(species)
+				rank = ncbi.get_rank(lineage)
+				r2t = {r:t for t, r in rank.items()}
+				genus = r2t['genus']
+				df.loc[species] = [ncbi.get_taxid_translator([species])[species], f"{genus}:0", True]
 
 	def convert_HSG_name(HSG, ncbi):
 		def get_scientific_name(tid, ncbi):

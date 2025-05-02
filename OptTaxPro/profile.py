@@ -127,7 +127,7 @@ def get_profile(fargs):
 		# seq3  | 1
 		# ...
 		#
-		w = subdf.groupby('seqid').apply(lambda x: 1 / x.shape[0])
+		w = subdf.groupby('seqid')[base].apply(lambda x: 1 / x.shape[0])
 		w = pd.DataFrame({'weight': w})
 
 		#####

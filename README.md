@@ -14,9 +14,11 @@ We strongly recommend you to use python virtual environment with [Anaconda](http
 * python 3.9.18
 * cutadapt 5.0
 * ete3 3.1.3
-* numpy 2.0.2
+* numpy 1.26.4
 * pandas 2.2.3
 * vsearch 2.30.0
+* scikit-learn 1.2.2 (only for building custom HSGs)
+* scikit-learn-extra 0.3.0 (only for building custom HSGs)
 
 
 ### 1.1 Build environment
@@ -37,6 +39,16 @@ The source files and useful scripts are in this repository. The database files h
 ```
 cd data/
 gunzip *.gz
+```
+
+### 1.3 Allow executable permissions
+
+For convenience, you need to allow executable permissions for all scripts
+
+```
+# On the top of the directory
+chmod +x OptTaxPro/OptTaxPro
+find . -name '*.py' -type f | xargs chmod +x
 ```
 
 
@@ -240,8 +252,7 @@ This script conducts HSG building algorithm that takes 16S sequences as an input
 build_HSG.py \
     -i examples/build_HSGs/three_genera.fna \
     -a OptTaxPro/data/acc2taxid.txt \
-    -o three_genera.HSG.csv \
-    -t tmp_dir 
+    -o three_genera.HSG.csv
 ```
 
 ## 4. Run example data
@@ -250,19 +261,63 @@ This is an example of OptTaxPro workflow to classify the simulated datasets. Exa
 
 ### 4.1 RUN OptTaxPro
 
-UPDATE SOON
+**NOTE** These simulated reads are all preprocessed ones. Thus, you **DO NOT** run preprocessing step for this (all reads are going to be ignored due to lack of primer sequences) 
 
 ```
-example code
+# making temporary directory
+mkdir test_run
+
+# Building OTUs first
+./OptTaxPro/OptTaxPro cluster \
+	-i examples/OptTaxPro \
+	-o test_run/OTUs \
+	--suffix .pbsim.fasta \
+	--log test_run.log
+	
+# Performing Taxonomic assignments
+./OptTaxPro/OptTaxPro classify \
+	-i test_run/OTUs \
+	-o test_run/classify \
+	--t_dir test_run \
+	--log test_run.log \
+	--search-cutoffs 0.97 \
+	--ranks species HSG genus \
+	--assign-cutoffs 97 97 94 \
+	--remove-self \
+	--u_dir test_run/OTUs \
+	--add-name
+	
+# Making profile table
+./OptTaxPro/OptTaxPro profile \
+	-i test_run/classify \
+	-o test_run/profile \
+	--log test_run.log \
+	--profile-ranks species HSG genus \
+	--base-col scientific_name \
+	--output-prefix simulated
 ```
 
-Expected outputs
+### 4.2 RUN OptTaxPro for realworld data
 
-### 4.2 Build custom HSGs
+**NOTE** Before running OptTaxPro, download samples from NCBI SRA under the accession number (PRJNA933120) and save them in `examples/PRJNA933120` directory.
 
 ```
-example code
+# making temporary directory
+mkdir test_realworld
+
+# Run end-to-end process using config file
+./OptTaxPro/OptTaxPro alltheway \
+	-c OptTaxPro/data/config.cfg 
 ```
 
-Expected outputs
+### 4.3 Build custom HSGs
+
+```
+# On the top of the directory
+
+./scripts/build_HSG.py \
+	-s examples/build_HSGs/three_genera.fna \
+	-a OptTaxPro/data/acc2taxid.txt \
+	-o HSG_three_genera.csv
+```
 

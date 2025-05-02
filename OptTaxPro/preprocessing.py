@@ -83,6 +83,10 @@ def parse_args(argv = sys.argv[1:]):
 
 	# singleton arguments
 	single_group = parser.add_argument_group("singleton removal arguments")
+	single_group.add_argument("--skip-singleton-removal",
+		dest="skip_single",
+		action="store_true",
+		help='Skip singleton removal process')
 	single_group.add_argument("--otu-cutoff",
 		dest='otu_cutoff',
 		metavar="FLOAT",
@@ -235,28 +239,33 @@ def main(argv = sys.argv[1:]):
 	auto_run(quality_control, cmds, args.p, quiet=args.quiet, desc="quality control")
 	logging.info(f"[{pname}] Done. (quality control)")
 
-	# run singleton removal
-	logging.info(f"[{pname}] FIND singletons (cutoff={args.otu_cutoff:.2f}) ")
-	cmd = ["python", f"{rpath}/utils/cluster_fast.py",
-		'-i', t_dir, '-o', t_dir,
-		'-t', str(args.threads), '-p', str(args.p // args.threads),
-		'-c', str(args.otu_cutoff), 
-		'--suffix', '.qc.fastq'
-	]
-	if args.quiet:
-		cmd += ['quiet']
-	if args.log is not None:
-		cmd += ['--log', args.log]
-	_ = run_cmd(cmd)
+	if not args.skip_single:
+		# run singleton removal
+		logging.info(f"[{pname}] FIND singletons (cutoff={args.otu_cutoff:.2f}) ")
+		cmd = ["python", f"{rpath}/utils/cluster_fast.py",
+			'-i', t_dir, '-o', t_dir,
+			'-t', str(args.threads), '-p', str(args.p // args.threads),
+			'-c', str(args.otu_cutoff), 
+			'--suffix', '.qc.fastq'
+		]
+		if args.quiet:
+			cmd += ['quiet']
+		if args.log is not None:
+			cmd += ['--log', args.log]
+		_ = run_cmd(cmd)
 
-	logging.info(f"[{pname}] REMOVE singletons")
-	cmds = []
-	for qc in qc_list:
-		uc = qc.replace('.qc.fastq', '.uc')
-		output = f"{args.o_dir}/{os.path.basename(qc).replace('.qc.fastq', '.clean.fastq')}"
-		cmds.append((qc, uc, output))
-	auto_run(remove_singleton, cmds, args.p, quiet=args.quiet, desc='remove singletons')
-	logging.info(f"[{pname}] Done. (singleton removal)")
+		logging.info(f"[{pname}] REMOVE singletons")
+		cmds = []
+		for qc in qc_list:
+			uc = qc.replace('.qc.fastq', '.uc')
+			output = f"{args.o_dir}/{os.path.basename(qc).replace('.qc.fastq', '.clean.fastq')}"
+			cmds.append((qc, uc, output))
+		auto_run(remove_singleton, cmds, args.p, quiet=args.quiet, desc='remove singletons')
+		logging.info(f"[{pname}] Done. (singleton removal)")
+	else:
+		for qc in qc_list:
+			output = f"{args.o_dir}/{os.path.basename(qc).replace('.qc.fastq', '.clean.fastq')}"
+			sp.run(['ln', '-s', os.path.realpath(qc), output])
 
 	# make preprocessing summary
 	summary = f"{args.o_dir}/preprocessing_summary.csv"

@@ -38,6 +38,7 @@ dependencies:
   - harfbuzz=11.1.0=h3beb420_0
   - icu=75.1=he02047a_0
   - isa-l=2.31.1=hb9d3cd8_1
+  - joblib=1.4.2=pyhd8ed1ab_1
   - keyutils=1.6.1=h166bdaf_0
   - krb5=1.21.3=h659f571_0
   - lame=3.100=h166bdaf_1003
@@ -108,7 +109,7 @@ dependencies:
   - ncurses=6.5=h2d0b736_3
   - nspr=4.36=h5888daf_0
   - nss=3.110=h159eef7_0
-  - numpy=2.0.2=py39h9cb892a_1
+  - numpy=1.26.4=py39h474f0d3_0
   - openldap=2.6.9=he970967_0
   - openssl=3.5.0=h7b32b05_0
   - packaging=25.0=pyh29332c3_1
@@ -133,10 +134,13 @@ dependencies:
   - pytz=2025.2=pyhd8ed1ab_0
   - qt-main=5.15.15=h993ce98_3
   - readline=8.2=h8c095d6_2
+  - scikit-learn=1.2.2=py39hc236052_2
+  - scikit-learn-extra=0.3.0=py39h958a0ad_0
   - scipy=1.13.1=py39haf93ffa_0
   - setuptools=80.1.0=pyhff2d567_0
   - sip=6.8.6=py39hf88036b_2
   - six=1.17.0=pyhd8ed1ab_0
+  - threadpoolctl=3.6.0=pyhecae5ae_0
   - tk=8.6.13=noxft_h4845f30_101
   - toml=0.10.2=pyhd8ed1ab_1
   - tomli=2.2.1=pyhd8ed1ab_1

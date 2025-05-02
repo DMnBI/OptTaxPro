@@ -112,11 +112,19 @@ def parse_args(argv = sys.argv[1:]):
 	return parser.parse_args(argv)
 
 def load_m6(file_name, rm_self=False):
+	def is_mapped_only_itself(query, db):
+		q_gcf = query.split('__')[0]
+		d_gcf = db.split('__')[0]
+
+		is_singleton = int(db.split('=')[-1]) == 1
+
+		return (q_gcf == d_gcf) and is_singleton
+
 	m6 = pd.read_csv(file_name, sep='\t', usecols=[0, 1, 2])
 	m6.columns = ['seqid', 'db', 'identity']
 
 	if rm_self:
-		m6['itself'] = [row['seqid'].split('__')[0] == row['db'].split('__')[0] for _, row in m6.iterrows()]
+		m6['itself'] = [is_mapped_only_itself(row['seqid'], row['db']) for _, row in m6.iterrows()]
 		m6 = m6.query('~itself').drop('itself', axis=1)
 
 	return m6
@@ -200,7 +208,7 @@ def make_assignment_table(m6_file, acc2taxid, hsg_list, ranks, cutoffs, rm_self=
 
 def expand_to_uc(assigned, uc_file):
 	uc = load_uc(uc_file)
-	expanded = pd.merge(left=assigned, right=uc, left_on='seqid', right_on='rep', how='outer')
+	expanded = pd.merge(left=assigned, right=uc, left_on='seqid', right_on='rep', how='inner')
 	expanded = expanded.drop(['seqid', 'rep'], axis=1)
 	expanded = expanded.sort_values(['query', 'rank'])
 

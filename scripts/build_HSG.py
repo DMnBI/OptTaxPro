@@ -76,7 +76,7 @@ def main(argv = sys.argv[1:]):
 	pname = os.path.basename(sys.argv[0])
 	rpath, _ = os.path.split(os.path.realpath(__file__))
 
-	t_dir = tempfile.mkdtemp(dir=args.t_dir, prefix='4_build_HSG_')
+	t_dir = tempfile.mkdtemp(dir=args.t_dir, prefix='build_HSG_')
 	EACH_GENUS = f"{t_dir}/each_genus"
 	M6_DIR = f"{t_dir}/m6"
 	IDMAT_DIR = f"{t_dir}/idmat"

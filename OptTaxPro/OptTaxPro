@@ -102,6 +102,10 @@ def build_parser():
 
 		# singleton arguments
 		single_group = preprocess.add_argument_group("singleton removal arguments")
+		single_group.add_argument("--skip-singleton-removal",
+			dest='skip_single',
+			action="store_true",
+			help="Skipping singleton removal step")
 		single_group.add_argument("--single-cutoff",
 			dest='single_cutoff',
 			metavar="FLOAT",
@@ -369,6 +373,8 @@ def run_preprocessing(args, rpath,
 		"-i", i_dir, "-o", o_dir,
 		"--suffix", suffix,
 	]
+	if args.skip_single:
+		cmd += ['--skip-singleton-removal']
 	if args.quiet:
 		cmd += ['--quiet']
 	if args.log is not None:
@@ -448,6 +454,7 @@ def run_profile(args, rpath,
 		'--base-col', args.base_col,
 		'--filtering-pivot', args.filter_pivot
 	]
+	cmd += ['--ranks'] + args.prof_ranks
 	if args.quiet:
 		cmd += ['--quiet']
 	if args.log is not None:
