@@ -373,7 +373,7 @@ def run_preprocessing(args, rpath,
 		"-i", i_dir, "-o", o_dir,
 		"--suffix", suffix,
 	]
-	if args.skip_single:
+	if args.skip_single is not None:
 		cmd += ['--skip-singleton-removal']
 	if args.quiet:
 		cmd += ['--quiet']
